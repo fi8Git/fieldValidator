@@ -23,8 +23,8 @@
 //  |                               |                                               | une date de fin (ici la valeur du champs inférieur à la valeur|
 //  |                               |                                               | du champ ciblé dans le data-*)                                |
 //  |_______________________________|_______________________________________________|_______________________________________________________________|
-//  | data-valid-required-dependance| selecteur du champ à verifier si il n'est pas | Permet de rendre le champ obligatoire si le champ renseigné   |
-//  |                               | vide                                          | n'est pas vide                                                |
+//  | data-valid-required-dependance| selecteur du champ à verifier                 | Permet de rendre le champ obligatoire si le champ renseigné   |
+//  |                               |                                               | n'est pas vide                                                |
 //  |_______________________________|_______________________________________________|_______________________________________________________________|
 //  | data-valid-max-length         | Entier                                        | Vérifie la longueur maximum autorisée                         |
 //  |_______________________________|_______________________________________________|_______________________________________________________________|
@@ -38,6 +38,8 @@
 //  |                               |                                               | pas null ou vide                                              |
 //  |_______________________________|_______________________________________________|_______________________________________________________________|
 //  | data-valid-url                | url à interroger                              | Vérifie si la reponse renvoyé par le serveur est true         |
+//  |_______________________________|_______________________________________________|_______________________________________________________________|
+//  | data-valid-url-msg-error      | String                                        | message d'erreur en cas d'invalidité                          |
 //  |_______________________________|_______________________________________________|_______________________________________________________________|
 //  | data-valid-extra-data         | data lié à l'url à interroger                 | Fournie les données à transmettre au serveur                  |
 //  |_______________________________|_______________________________________________|_______________________________________________________________|
@@ -131,11 +133,12 @@ async function verifFieldAsync(field, firstVerif = true) {
         return false;
     }
 
-    if (field.validationAttr.url && checkHasValue(field)) {
-        let isValid = await checkIsValidByUrlAsync(field.validationAttr.url + field.element.value, field.element.dataset.validExtraData)
+    if (field.validationAttr.byUrl && checkHasValue(field)) {
+        field.validationAttr.byUrl.data.value = field.element.value;
+        let isValid = await checkIsValidByUrlAsync(field.validationAttr.byUrl.url, field.validationAttr.byUrl.data);
 
         if(!isValid){
-            setFieldError(field, Dico.get("msg_element_existant"));
+            setFieldError(field, field.validationAttr.byUrl.msgError);
             return false;
         }
     }
@@ -165,7 +168,6 @@ function getModelValidateField(idForm){
 
     for(const field of listField)
         model.push({
-            textError: [],
             idToggle: field.dataset.validToggleShow,
             checkboxLinked: field.dataset.validCheckboxLinked,
             type: getFieldType(field),
@@ -234,6 +236,13 @@ function getFieldValidationAttr(field, idForm){
     
     if(field.type == "email")
         validations.checkEmail = true;
+    
+    if(field.hasAttribute("data-valid-url"))
+        validations.byUrl = {
+            url: field.dataset.validUrl,
+            msgError: field.dataset.validUrlMsgError,
+            data: field.dataset.validExtraData != null? JSON.parse(field.dataset.validExtraData) : {}
+        };
 
     return validations;
 }
@@ -282,35 +291,29 @@ function removeErrorRadio(errorArea, idForm){
  * @param {Object} field 
  */
 function setFieldError(field, textError){
-    field.element.closest(".form-group").classList.add("has-error");
-    
-    if(field.type == "summernote")
-        field.element.parentElement.querySelector(".note-editor").classList.add("has-error-summernote");
+    if(field.type == "summernote"){
+        let summernote = field.element.parentElement.querySelector(".note-editor");
+
+        if(summernote.classList.contains("has-success-summernote"))
+            summernote.classList.remove("has-success-summernote")
+
+        if(!summernote.classList.contains("has-error-summernote"))
+            summernote.classList.add("has-error-summernote");
+
+    }else{
+        let div = field.element.closest(".form-group");
+
+        if(div.classList.contains("has-success"))
+            div.classList.remove("has-success");
+
+        if(!div.classList.contains("has-error"))
+            div.classList.add("has-error");
+    }
 
     renderMsgError(getFieldErrorContainer(field), field.idError, textError);
 
     if (field.idToggle)
         $(field.idToggle).slideDown();
-}
-
-function resetField(field){
-    if(field.type == "summernote"){
-        let summernote = field.element.parentElement.querySelector(".note-editor");
-        if(summernote.classList.contains("has-error-summernote"))
-            summernote.classList.remove("has-error-summernote");
-        
-        if(summernote.classList.contains("has-success-summernote"))
-            summernote.classList.remove("has-success-summernote");
-    }else{
-        let div = field.element.closest(".form-group");
-        if(div.classList.contains("has-error"))
-            div.classList.remove("has-error");
-        
-        if(div.classList.contains("has-success"))
-            div.classList.remove("has-success");
-    }
-      
-    removeMsgError(field.idError);
 }
 
 /**
@@ -338,6 +341,26 @@ function setFieldSuccess(field){
             div.classList.add("has-success");
     }
 
+    removeMsgError(field.idError);
+}
+
+function resetField(field){
+    if(field.type == "summernote"){
+        let summernote = field.element.parentElement.querySelector(".note-editor");
+        if(summernote.classList.contains("has-error-summernote"))
+            summernote.classList.remove("has-error-summernote");
+        
+        if(summernote.classList.contains("has-success-summernote"))
+            summernote.classList.remove("has-success-summernote");
+    }else{
+        let div = field.element.closest(".form-group");
+        if(div.classList.contains("has-error"))
+            div.classList.remove("has-error");
+        
+        if(div.classList.contains("has-success"))
+            div.classList.remove("has-success");
+    }
+      
     removeMsgError(field.idError);
 }
 
@@ -390,7 +413,14 @@ function resetFields(listField){
         if(f.type == "summernote")
             f.element.closest(".note-editor").classList.remove(["has-error-summernote", "has-success-summernote"]);
 
-        f.element.closest(".form-group").classList.remove(["has-error", "has-success"]);
+        let classListElt = f.element.closest(".form-group").classList;
+
+        if(classListElt.contains("has-success"))
+            classListElt.remove("has-success");
+
+        if(classListElt.contains("has-error"))
+            classListElt.remove("has-error");
+
         let errorElt = document.querySelector(`#${f.idError}`);
 
         if(errorElt != null)
@@ -409,7 +439,12 @@ function purgeFormFieldsErrorAndStyle(formSelector){
 
     for(const div of fieldsDiv){
         let errorArea = div.querySelector(".fieldErrorText");
-        div.classList.remove(["has-success", "has-error"]);
+
+        if(div.classList.contains("has-success"))
+            div.classList.remove("has-success");
+
+        if(div.classList.contains("has-error"))
+            div.classList.remove("has-error");
 
         if(errorArea) 
             errorArea.remove();
@@ -505,7 +540,7 @@ async function checkIsValidByUrlAsync(url, extraData){
         contentType: "application/json; charset=utf-8",
     }
 
-    if(extraData !== undefined)
+    if(extraData !== null)
         param.data = extraData;
 
     return new Promise((response) => {
